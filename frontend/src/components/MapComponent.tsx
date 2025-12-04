@@ -9,12 +9,12 @@ const MapComponent = () => {
   const mapDiv = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-  esriConfig.apiKey = import.meta.env.VITE_ARCGIS_API_KEY as string;
+    esriConfig.apiKey = import.meta.env.VITE_ARCGIS_API_KEY as string;
 
-  if (mapDiv.current) {
-    const map = new Map({
-      basemap: "streets-navigation-vector"
-    });
+    if (mapDiv.current) {
+      const map = new Map({
+        basemap: "streets-navigation-vector"
+      });
 
       const view = new MapView({
         container: mapDiv.current,
@@ -31,7 +31,7 @@ const MapComponent = () => {
     }
   }, []);
 
-  return <div className="map-container" ref={mapDiv} style={{ height: '100vh', width: '100%' }}></div>;
+  return <div className="map-container" ref={mapDiv} style={{ height: '100%', width: '100%' }}></div>;
 };
 
-export default MapComponent; 
+export default MapComponent;

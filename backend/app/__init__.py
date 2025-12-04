@@ -20,8 +20,11 @@ def create_app():
     CORS(app)
     migrate.init_app(app, db)
 
-    from . import routes, models
+    from . import models
     
-    app.register_blueprint(routes.bp)
+    from .routes import api, main_bp
+    
+    app.register_blueprint(main_bp)
+    app.register_blueprint(api)
 
     return app
