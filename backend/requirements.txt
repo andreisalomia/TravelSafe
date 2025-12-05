@@ -3,3 +3,6 @@ flask-sqlalchemy
 flask-cors 
 flask-migrate 
 python-dotenv
+PyJWT
+flask-bcrypt
+
