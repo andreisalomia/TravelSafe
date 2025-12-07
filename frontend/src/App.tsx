@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import MapComponent from './components/MapComponent';
 import AuthForm from './components/AuthForm';
 import NavbarComponent from './components/Navbar';
+import EventModal from './components/EventModal';
 import { authService } from './services/authService';
 import { Spinner, Container } from 'react-bootstrap';
 
@@ -9,6 +10,9 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [clickedCoords, setClickedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -47,6 +51,16 @@ function App() {
     }
   };
 
+  // new handler: called by MapComponent when the map is clicked
+  const handleMapClick = useCallback((coords: { latitude: number; longitude: number }) => {
+    setClickedCoords(coords);
+    setShowEventModal(true);
+  }, []); // stable identity
+
+  const handleEventCreated = (event: any) => {
+    console.log('Event created:', event);
+  };
+
   if (loading) {
     return (
       <Container fluid className="min-vh-100 d-flex align-items-center justify-content-center">
@@ -65,8 +79,16 @@ function App() {
     <div className="App">
       <NavbarComponent user={user} onLogout={handleLogout} />
       <div style={{ marginTop: '56px', height: 'calc(100vh - 56px)' }}>
-        <MapComponent />
+        <MapComponent onMapClick={handleMapClick} />
       </div>
+
+      <EventModal
+        show={showEventModal}
+        latitude={clickedCoords?.latitude ?? null}
+        longitude={clickedCoords?.longitude ?? null}
+        onClose={() => setShowEventModal(false)}
+        onCreated={handleEventCreated}
+      />
     </div>
   );
 }

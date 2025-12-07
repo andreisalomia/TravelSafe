@@ -66,7 +66,7 @@ export const eventsService = {
   },
 
   async createEvent(data: CreateEventData): Promise<Event> {
-    const response = await api.post<{ event: Event }>('/api/events', data);
+    const response = await api.post<{ event: Event }>('/api/events/', data);
     return response.data.event;
   },
 
