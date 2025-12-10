@@ -6,6 +6,51 @@ from .. import db
 
 events_bp = Blueprint('events', __name__)
 
+# --- RUTA NOUĂ PENTRU HARTĂ (Map Data) ---
+@events_bp.route('/map-data', methods=['GET'])
+def get_map_data():
+    """
+    Returnează datele optimizate pentru harta din Frontend (ArcGIS).
+    Separă datele în markere și puncte pentru heatmap.
+    """
+    try:
+        # Luăm doar evenimentele active
+        active_events = Event.query.filter_by(status='active').all()
+        
+        markers = []
+        heatmap_points = []
+        
+        for event in active_events:
+            # 1. Date pentru Markere (Userul dă click pe ele)
+            # Mapam 'latitude' -> 'lat' și 'longitude' -> 'lng' pentru frontend
+            markers.append({
+                'id': event.id,
+                'type': event.type,
+                'severity': event.severity,
+                'lat': event.latitude,
+                'lng': event.longitude,
+                'created_at': event.created_at.isoformat(),
+                'description': f"{event.type.capitalize()} - Severitate: {event.severity}"
+            })
+
+            # 2. Date pentru Heatmap (ArcGIS folosește severitatea ca intensitate)
+            heatmap_points.append({
+                'lat': event.latitude,
+                'lng': event.longitude,
+                'weight': event.severity 
+            })
+
+        return jsonify({
+            'markers': markers,
+            'heatmap': heatmap_points
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Eroare la map-data: {e}")
+        return jsonify({'message': f'Error fetching map data: {str(e)}'}), 500
+
+# --- RUTELE EXISTENTE ---
+
 @events_bp.route('/', methods=['GET'])
 def get_all_events():
     try:

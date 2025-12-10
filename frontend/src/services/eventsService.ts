@@ -1,4 +1,28 @@
 import api from './api';
+import axios from 'axios';
+
+// --- INTERFEȚE (Tipuri de date) ---
+
+export interface MapData {
+  markers: MarkerData[];
+  heatmap: HeatmapPoint[];
+}
+
+export interface MarkerData {
+  id: number;
+  type: string;
+  severity: number;
+  lat: number;
+  lng: number;
+  description: string;
+  created_at: string;
+}
+
+export interface HeatmapPoint {
+  lat: number;
+  lng: number;
+  weight: number;
+}
 
 export interface Event {
   id: number;
@@ -41,6 +65,38 @@ export interface EventStatistics {
   by_severity: Record<string, number>;
 }
 
+// --- CONSTANTE PENTRU UI ---
+
+export const EVENT_TYPE_LABELS: Record<string, string> = {
+  accident: 'Accident',
+  construction: 'Construction',
+  traffic_jam: 'Traffic Jam',
+  road_closure: 'Road Closure',
+  hazard: 'Hazard',
+  police: 'Police',
+  other: 'Other',
+};
+
+export const EVENT_TYPE_COLORS: Record<string, string> = {
+  accident: '#dc3545',
+  construction: '#ffc107',
+  traffic_jam: '#ff5722',
+  road_closure: '#9c27b0',
+  hazard: '#ff9800',
+  police: '#2196f3',
+  other: '#607d8b',
+};
+
+export const SEVERITY_LABELS: Record<number, string> = {
+  1: 'Very Low',
+  2: 'Low',
+  3: 'Medium',
+  4: 'High',
+  5: 'Critical',
+};
+
+// --- SERVICIUL PRINCIPAL (CRUD) ---
+
 export const eventsService = {
   async getAllEvents(filters?: {
     type?: string;
@@ -54,6 +110,7 @@ export const eventsService = {
     if (filters?.status) params.append('status', filters.status);
     if (filters?.limit) params.append('limit', filters.limit.toString());
 
+    // Ruta din backend este sub /api/events
     const response = await api.get<EventsResponse>(
       `/api/events?${params.toString()}`
     );
@@ -105,30 +162,17 @@ export const eventsService = {
   },
 };
 
-export const EVENT_TYPE_LABELS: Record<string, string> = {
-  accident: 'Accident',
-  construction: 'Construction',
-  traffic_jam: 'Traffic Jam',
-  road_closure: 'Road Closure',
-  hazard: 'Hazard',
-  police: 'Police',
-  other: 'Other',
-};
+// --- FUNCȚIA PENTRU MAP COMPONENT ---
 
-export const EVENT_TYPE_COLORS: Record<string, string> = {
-  accident: '#dc3545',
-  construction: '#ffc107',
-  traffic_jam: '#ff5722',
-  road_closure: '#9c27b0',
-  hazard: '#ff9800',
-  police: '#2196f3',
-  other: '#607d8b',
-};
+// URL-ul Backend-ului
+const BASE_URL = 'http://127.0.0.1:5000';
 
-export const SEVERITY_LABELS: Record<number, string> = {
-  1: 'Very Low',
-  2: 'Low',
-  3: 'Medium',
-  4: 'High',
-  5: 'Critical',
+export const getMapData = async (): Promise<MapData> => {
+  try {
+    const response = await axios.get<MapData>(`${BASE_URL}/api/events/map-data`);
+    return response.data;
+  } catch (error) {
+    console.error("❌ Eroare la preluarea datelor GIS:", error);
+    return { markers: [], heatmap: [] };
+  }
 };
