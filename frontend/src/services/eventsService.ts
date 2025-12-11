@@ -165,14 +165,15 @@ export const eventsService = {
 // --- FUNCȚIA PENTRU MAP COMPONENT ---
 
 // URL-ul Backend-ului
-const BASE_URL = 'http://127.0.0.1:5000';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
 
 export const getMapData = async (): Promise<MapData> => {
   try {
     const response = await axios.get<MapData>(`${BASE_URL}/api/events/map-data`);
     return response.data;
   } catch (error) {
-    console.error("❌ Eroare la preluarea datelor GIS:", error);
+    console.error('Error fetching map data:', error);
     return { markers: [], heatmap: [] };
   }
 };
+
