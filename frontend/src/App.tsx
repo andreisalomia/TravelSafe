@@ -157,8 +157,15 @@ function App() {
       }
       setShowRouteModal(false);
     } catch (err: any) {
-      console.error('Route error', err);
-      setRouteError(err?.message || 'Failed to calculate route');
+      // Enhanced error logging for debugging
+      console.error('Route error details:', {
+        message: err?.message,
+        name: err?.name,
+        details: err?.details,
+        stack: err?.stack,
+        fullError: err
+      });
+      setRouteError(err?.message || err?.details?.messages?.join(', ') || 'Failed to calculate route');
     } finally {
       setRouteLoading(false);
     }
@@ -191,7 +198,8 @@ function App() {
         <MapComponent
           onMapClick={handleMapClick}
           onIncidentsLoaded={setIncidents}
-          activeRoute={activeRoute?.geometry ?? null}
+          // FIX: Use geometryWgs84Json instead of geometry to ensure proper serialization through React state
+          activeRoute={activeRoute?.geometryWgs84Json ?? null}
           routeStops={{
             start: routeStart || undefined,
             end: routeEnd || undefined

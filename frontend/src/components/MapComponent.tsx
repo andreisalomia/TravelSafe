@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Map from '@arcgis/core/Map';
 import MapView from '@arcgis/core/views/MapView';
 import esriConfig from '@arcgis/core/config';
@@ -18,7 +18,8 @@ import '@arcgis/core/assets/esri/themes/light/main.css';
 interface MapComponentProps {
   onMapClick?: (coords: { latitude: number; longitude: number }) => void;
   onIncidentsLoaded?: (markers: MarkerData[]) => void;
-  activeRoute?: Polyline | null;
+  // Accept either Polyline instance or JSON properties
+  activeRoute?: __esri.PolylineProperties | Polyline | null;
   routeStops?: { start?: { latitude: number; longitude: number }; end?: { latitude: number; longitude: number } };
   forcePointSelection?: boolean;
 }
@@ -37,6 +38,9 @@ const MapComponent = ({
   const routeStopsLayerRef = useRef<GraphicsLayer | null>(null);
   const clickHandlerRef = useRef<typeof onMapClick | undefined>(undefined);
   const incidentsHandlerRef = useRef<typeof onIncidentsLoaded | undefined>(undefined);
+  
+  // Track when the view is ready
+  const [viewReady, setViewReady] = useState(false);
 
   useEffect(() => {
     clickHandlerRef.current = onMapClick;
@@ -55,6 +59,7 @@ const MapComponent = ({
     return [0, 255, 0, 0.9];
   };
 
+  // Initialize map
   useEffect(() => {
     esriConfig.apiKey = import.meta.env.VITE_ARCGIS_API_KEY as string;
     if (!mapDiv.current) return;
@@ -73,6 +78,23 @@ const MapComponent = ({
     viewRef.current = view;
 
     view.when(async () => {
+      console.log('[MapComponent] View is ready');
+      
+      // Create route layers immediately when view is ready
+      if (!routeLayerRef.current) {
+        routeLayerRef.current = new GraphicsLayer({ title: 'Active Route' });
+        view.map.add(routeLayerRef.current);
+        console.log('[MapComponent] Route layer created');
+      }
+      if (!routeStopsLayerRef.current) {
+        routeStopsLayerRef.current = new GraphicsLayer({ title: 'Route Stops' });
+        view.map.add(routeStopsLayerRef.current);
+        console.log('[MapComponent] Route stops layer created');
+      }
+      
+      // Mark view as ready - this will trigger the route rendering effect
+      setViewReady(true);
+      
       if (layersLoadedRef.current) return;
       const data = await getMapData();
 
@@ -179,34 +201,71 @@ const MapComponent = ({
     };
   }, []);
 
+  // Render route when activeRoute changes AND view is ready
   useEffect(() => {
-    const view = viewRef.current;
-    if (!view || !view.map) return;
+    console.log('[MapComponent] Route effect triggered', { 
+      viewReady, 
+      hasActiveRoute: !!activeRoute,
+      hasRouteStops: !!routeStops,
+      activeRouteType: activeRoute ? typeof activeRoute : 'null',
+      activeRoutePaths: activeRoute && 'paths' in activeRoute ? (activeRoute as any).paths?.length : 'N/A'
+    });
 
-    if (!routeLayerRef.current) {
-      routeLayerRef.current = new GraphicsLayer({ title: 'Active Route' });
-      view.map.add(routeLayerRef.current);
+    // Wait for view to be ready
+    if (!viewReady) {
+      console.log('[MapComponent] View not ready yet, skipping route render');
+      return;
     }
-    if (!routeStopsLayerRef.current) {
-      routeStopsLayerRef.current = new GraphicsLayer({ title: 'Route Stops' });
-      view.map.add(routeStopsLayerRef.current);
+
+    const view = viewRef.current;
+    if (!view || !view.map) {
+      console.log('[MapComponent] View or map is null');
+      return;
     }
 
     const routeLayer = routeLayerRef.current;
     const stopsLayer = routeStopsLayerRef.current;
+    
+    if (!routeLayer || !stopsLayer) {
+      console.log('[MapComponent] Route layers not initialized');
+      return;
+    }
+
+    // Clear existing graphics
     routeLayer.removeAll();
     stopsLayer.removeAll();
 
     if (!activeRoute) {
+      console.log('[MapComponent] No active route to display');
       return;
     }
 
-    const geometry =
-      activeRoute instanceof Polyline ? activeRoute : new Polyline(activeRoute as any);
-
-    if (!geometry || !geometry.paths?.length) {
+    // Create Polyline from the route data
+    let geometry: Polyline;
+    try {
+      if (activeRoute instanceof Polyline) {
+        geometry = activeRoute;
+        console.log('[MapComponent] Using existing Polyline instance');
+      } else {
+        // It's a JSON/properties object, create new Polyline
+        geometry = new Polyline(activeRoute);
+        console.log('[MapComponent] Created new Polyline from JSON', {
+          paths: geometry.paths,
+          pathCount: geometry.paths?.length,
+          firstPathLength: geometry.paths?.[0]?.length
+        });
+      }
+    } catch (err) {
+      console.error('[MapComponent] Failed to create Polyline:', err);
       return;
     }
+
+    if (!geometry || !geometry.paths || geometry.paths.length === 0) {
+      console.log('[MapComponent] Geometry has no paths', { geometry });
+      return;
+    }
+
+    console.log('[MapComponent] Adding route graphic with', geometry.paths.length, 'paths');
 
     const routeGraphic = new Graphic({
       geometry,
@@ -216,53 +275,64 @@ const MapComponent = ({
       })
     });
     routeLayer.add(routeGraphic);
+    console.log('[MapComponent] Route graphic added');
 
+    // Add start marker
     if (routeStops?.start) {
-      stopsLayer.add(
-        new Graphic({
-          geometry: new Point({
-            latitude: routeStops.start.latitude,
-            longitude: routeStops.start.longitude
-          }),
-          symbol: new SimpleMarkerSymbol({
-            color: [46, 204, 113, 0.95],
-            size: '12px',
-            outline: { color: [255, 255, 255], width: 1.5 }
-          }),
-          attributes: { name: 'Start' },
-          popupTemplate: { title: 'Start' }
-        })
-      );
+      const startGraphic = new Graphic({
+        geometry: new Point({
+          latitude: routeStops.start.latitude,
+          longitude: routeStops.start.longitude
+        }),
+        symbol: new SimpleMarkerSymbol({
+          color: [46, 204, 113, 0.95],
+          size: '14px',
+          outline: { color: [255, 255, 255], width: 2 }
+        }),
+        attributes: { name: 'Start' },
+        popupTemplate: { title: 'Start' }
+      });
+      stopsLayer.add(startGraphic);
+      console.log('[MapComponent] Start marker added at', routeStops.start);
     }
 
+    // Add end marker
     if (routeStops?.end) {
-      stopsLayer.add(
-        new Graphic({
-          geometry: new Point({
-            latitude: routeStops.end.latitude,
-            longitude: routeStops.end.longitude
-          }),
-          symbol: new SimpleMarkerSymbol({
-            color: [231, 76, 60, 0.95],
-            size: '12px',
-            outline: { color: [255, 255, 255], width: 1.5 }
-          }),
-          attributes: { name: 'Destination' },
-          popupTemplate: { title: 'Destination' }
-        })
-      );
+      const endGraphic = new Graphic({
+        geometry: new Point({
+          latitude: routeStops.end.latitude,
+          longitude: routeStops.end.longitude
+        }),
+        symbol: new SimpleMarkerSymbol({
+          color: [231, 76, 60, 0.95],
+          size: '14px',
+          outline: { color: [255, 255, 255], width: 2 }
+        }),
+        attributes: { name: 'Destination' },
+        popupTemplate: { title: 'Destination' }
+      });
+      stopsLayer.add(endGraphic);
+      console.log('[MapComponent] End marker added at', routeStops.end);
     }
 
+    // Zoom to fit the route
+    const allGraphics = [routeGraphic, ...stopsLayer.graphics.toArray()];
     view
       .goTo(
         {
-          target: [routeGraphic, ...stopsLayer.graphics.toArray()],
-          padding: { top: 40, bottom: 40, left: 40, right: 40 }
+          target: allGraphics,
+          padding: { top: 50, bottom: 50, left: 50, right: 350 } // Extra right padding for the info card
         },
-        { duration: 400 }
+        { duration: 500 }
       )
-      .catch(() => {});
-  }, [activeRoute, routeStops]);
+      .then(() => {
+        console.log('[MapComponent] View zoomed to route');
+      })
+      .catch((err) => {
+        console.warn('[MapComponent] Failed to zoom to route:', err);
+      });
+
+  }, [activeRoute, routeStops, viewReady]);
 
   return <div className="map-container" ref={mapDiv} style={{ height: '100%', width: '100%' }} />;
 };
