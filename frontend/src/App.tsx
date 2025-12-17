@@ -32,6 +32,8 @@ function App() {
   const [routeInfo, setRouteInfo] = useState<{ distanceText: string; timeText: string } | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState('');
+  // New state for displaying route type description
+  const [routeDescription, setRouteDescription] = useState<string | null>(null);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -128,8 +130,10 @@ function App() {
     setRouteLoading(true);
     setRouteError('');
     setRouteEvaluation(null);
+    setRouteDescription(null);
 
     try {
+      // 1. Calculate route geometry using ArcGIS (Frontend)
       const result = await calculateRoute(
         {
           start: routeStart,
@@ -139,11 +143,16 @@ function App() {
         },
         incidents
       );
+      
+      // Set initial visual state
       setActiveRoute(result);
       setRouteMode(mode);
       setRouteAvoidTypes(avoidTypes);
+      // Set temporary estimation from ArcGIS
       setRouteInfo({ distanceText: result.distanceText, timeText: result.timeText });
+
       try {
+        // 2. Log route to backend for analysis and precise calculation
         const evaluation = await routesService.logRoute({
           start: routeStart,
           end: routeEnd,
@@ -151,13 +160,25 @@ function App() {
           avoid_types: avoidTypes,
           polyline: result.geometryWgs84Json
         });
+        
         setRouteEvaluation(evaluation);
+
+        // --- UPDATE UI WITH PRECISE DATA FROM PYTHON BACKEND ---
+        if (evaluation.metrics) {
+            setRouteInfo({ 
+                distanceText: `${evaluation.metrics.distance_km} km`, 
+                timeText: `${Math.round(evaluation.metrics.duration_minutes)} min` 
+            });
+            if (evaluation.metrics.description) {
+                setRouteDescription(evaluation.metrics.description);
+            }
+        }
       } catch (logErr) {
         console.error('Failed to log route in backend', logErr);
       }
       setShowRouteModal(false);
     } catch (err: any) {
-      // Enhanced error logging for debugging
+      // Enhanced error logging
       console.error('Route error details:', {
         message: err?.message,
         name: err?.name,
@@ -175,6 +196,7 @@ function App() {
     setActiveRoute(null);
     setRouteInfo(null);
     setRouteEvaluation(null);
+    setRouteDescription(null);
   };
 
   if (loading) {
@@ -234,6 +256,14 @@ function App() {
                   <div className="fw-semibold">Active Route</div>
                   <Badge bg="secondary" className="text-uppercase">{routeMode}</Badge>
                 </div>
+                
+                {/* Route Type Description (New) */}
+                {routeDescription && (
+                    <div className="mb-2 text-center">
+                        <Badge bg="info" className="text-dark">{routeDescription}</Badge>
+                    </div>
+                )}
+
                 <div className="d-flex justify-content-between">
                   <span>Distance</span>
                   <span className="fw-semibold">{routeInfo.distanceText}</span>
