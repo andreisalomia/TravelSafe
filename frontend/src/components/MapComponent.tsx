@@ -14,8 +14,8 @@ import HeatmapRenderer from '@arcgis/core/renderers/HeatmapRenderer';
 import { getMapData, type MarkerData } from '../services/eventsService';
 
 import '@arcgis/core/assets/esri/themes/light/main.css';
-
-interface MapComponentProps {
+// commit
+interface MapComponentProps {  
   onMapClick?: (coords: { latitude: number; longitude: number }) => void;
   onIncidentsLoaded?: (markers: MarkerData[]) => void;
   // Accept either Polyline instance or JSON properties
