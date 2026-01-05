@@ -11,13 +11,19 @@ import SimpleLineSymbol from '@arcgis/core/symbols/SimpleLineSymbol';
 import SimpleMarkerSymbol from '@arcgis/core/symbols/SimpleMarkerSymbol';
 import HeatmapRenderer from '@arcgis/core/renderers/HeatmapRenderer';
 
-import { getMapData, type MarkerData } from '../services/eventsService';
+import { getMapData, type MarkerData, eventsService } from '../services/eventsService';
+import type { FavoritePlace } from '../services/favoritesService';
 
 import '@arcgis/core/assets/esri/themes/light/main.css';
 // commit
 interface MapComponentProps {  
   onMapClick?: (coords: { latitude: number; longitude: number }) => void;
   onIncidentsLoaded?: (markers: MarkerData[]) => void;
+  onFavoriteClick?: (favorite: FavoritePlace) => void;
+  onIncidentDeleted?: (id: number) => void;
+  favorites?: FavoritePlace[];
+  canDeleteIncidents?: boolean;
+  refreshIncidentsTick?: number;
   // Accept either Polyline instance or JSON properties
   activeRoute?: __esri.PolylineProperties | Polyline | null;
   routeStops?: { start?: { latitude: number; longitude: number }; end?: { latitude: number; longitude: number } };
@@ -27,6 +33,11 @@ interface MapComponentProps {
 const MapComponent = ({
   onMapClick,
   onIncidentsLoaded,
+  onFavoriteClick,
+  onIncidentDeleted,
+  favorites = [],
+  canDeleteIncidents = false,
+  refreshIncidentsTick = 0,
   activeRoute,
   routeStops,
   forcePointSelection = false
@@ -36,8 +47,16 @@ const MapComponent = ({
   const layersLoadedRef = useRef<boolean>(false);
   const routeLayerRef = useRef<GraphicsLayer | null>(null);
   const routeStopsLayerRef = useRef<GraphicsLayer | null>(null);
+  const incidentsLayerRef = useRef<GraphicsLayer | null>(null);
+  const favoritesLayerRef = useRef<GraphicsLayer | null>(null);
+  const heatmapLayerRef = useRef<FeatureLayer | null>(null);
   const clickHandlerRef = useRef<typeof onMapClick | undefined>(undefined);
   const incidentsHandlerRef = useRef<typeof onIncidentsLoaded | undefined>(undefined);
+  const favoriteHandlerRef = useRef<typeof onFavoriteClick | undefined>(undefined);
+  const incidentDeletedHandlerRef = useRef<typeof onIncidentDeleted | undefined>(undefined);
+  const incidentsDataRef = useRef<MarkerData[]>([]);
+  const favoritesRef = useRef<FavoritePlace[]>([]);
+  const canDeleteIncidentsRef = useRef<boolean>(canDeleteIncidents);
   
   // Track when the view is ready
   const [viewReady, setViewReady] = useState(false);
@@ -49,6 +68,109 @@ const MapComponent = ({
   useEffect(() => {
     incidentsHandlerRef.current = onIncidentsLoaded;
   }, [onIncidentsLoaded]);
+
+  useEffect(() => {
+    favoriteHandlerRef.current = onFavoriteClick;
+  }, [onFavoriteClick]);
+
+  useEffect(() => {
+    incidentDeletedHandlerRef.current = onIncidentDeleted;
+  }, [onIncidentDeleted]);
+
+  useEffect(() => {
+    favoritesRef.current = favorites;
+  }, [favorites]);
+
+  useEffect(() => {
+    canDeleteIncidentsRef.current = canDeleteIncidents;
+  }, [canDeleteIncidents]);
+
+  const loadIncidents = async () => {
+    const view = viewRef.current;
+    if (!view || !view.map) return;
+
+    const data = await getMapData();
+    if (!data || !data.markers) {
+      console.warn('No map data received from backend.');
+      return;
+    }
+
+    incidentsDataRef.current = data.markers;
+    incidentsHandlerRef.current?.(data.markers);
+
+    if (!incidentsLayerRef.current) {
+      incidentsLayerRef.current = new GraphicsLayer({ title: 'Markere Incidente' });
+      view.map.add(incidentsLayerRef.current);
+    }
+    const graphicsLayer = incidentsLayerRef.current;
+    graphicsLayer.removeAll();
+
+    data.markers.forEach((marker) => {
+      const point = new Point({
+        longitude: marker.lng,
+        latitude: marker.lat
+      });
+
+      const markerSymbol = new SimpleMarkerSymbol({
+        color: getSeverityColor(marker.severity),
+        outline: { color: [255, 255, 255], width: 1 },
+        size: '12px'
+      });
+
+      const graphic = new Graphic({
+        geometry: point,
+        symbol: markerSymbol,
+        attributes: {
+          ObjectId: marker.id,
+          Tip: marker.type.toUpperCase(),
+          Descriere: marker.description,
+          Severitate: marker.severity
+        },
+        popupTemplate: {
+          title: '{Tip}',
+          content: 'Severitate: {Severitate}/5<br>Descriere: {Descriere}'
+        }
+      });
+
+      graphicsLayer.add(graphic);
+    });
+
+    const heatmapGraphics = data.markers.map((marker, index) => {
+      return new Graphic({
+        geometry: new Point({ longitude: marker.lng, latitude: marker.lat }),
+        attributes: {
+          ObjectID: index,
+          severity_val: marker.severity
+        }
+      });
+    });
+
+    if (heatmapLayerRef.current && view.map) {
+      view.map.remove(heatmapLayerRef.current);
+    }
+
+    const heatmapLayer = new FeatureLayer({
+      source: heatmapGraphics,
+      objectIdField: 'ObjectID',
+      fields: [
+        { name: 'ObjectID', alias: 'ObjectID', type: 'oid' },
+        { name: 'severity_val', alias: 'Severity Value', type: 'integer' }
+      ],
+      renderer: new HeatmapRenderer({
+        field: 'severity_val',
+        colorStops: [
+          { ratio: 0, color: 'rgba(0, 255, 0, 0)' },
+          { ratio: 0.2, color: 'rgba(0, 255, 0, 1)' },
+          { ratio: 0.5, color: 'rgba(255, 255, 0, 1)' },
+          { ratio: 0.8, color: 'rgba(255, 140, 0, 1)' },
+          { ratio: 1, color: 'rgba(255, 0, 0, 1)' }
+        ],
+        radius: 16
+      }) as any
+    });
+    heatmapLayerRef.current = heatmapLayer;
+    view.map.add(heatmapLayer, 0);
+  };
 
   // --- CONFIGURARE CULORI ---
   const getSeverityColor = (severity: number): number[] => {
@@ -83,12 +205,16 @@ const MapComponent = ({
       // Create route layers immediately when view is ready
       if (!routeLayerRef.current) {
         routeLayerRef.current = new GraphicsLayer({ title: 'Active Route' });
-        view.map.add(routeLayerRef.current);
+        if (view.map) {
+          view.map.add(routeLayerRef.current);
+        }
         console.log('[MapComponent] Route layer created');
       }
       if (!routeStopsLayerRef.current) {
         routeStopsLayerRef.current = new GraphicsLayer({ title: 'Route Stops' });
-        view.map.add(routeStopsLayerRef.current);
+        if (view.map) {
+          view.map.add(routeStopsLayerRef.current);
+        }
         console.log('[MapComponent] Route stops layer created');
       }
       
@@ -96,95 +222,54 @@ const MapComponent = ({
       setViewReady(true);
       
       if (layersLoadedRef.current) return;
-      const data = await getMapData();
-
-      if (!data || !data.markers) {
-        console.warn('No map data received from backend.');
-        return;
-      }
-
-      incidentsHandlerRef.current?.(data.markers);
-
-      const graphicsLayer = new GraphicsLayer({ title: 'Markere Incidente' });
-
-      data.markers.forEach((marker) => {
-        const point = new Point({
-          longitude: marker.lng,
-          latitude: marker.lat
-        });
-
-        const markerSymbol = new SimpleMarkerSymbol({
-          color: getSeverityColor(marker.severity),
-          outline: { color: [255, 255, 255], width: 1 },
-          size: '12px'
-        });
-
-        const graphic = new Graphic({
-          geometry: point,
-          symbol: markerSymbol,
-          attributes: {
-            ObjectId: marker.id,
-            Tip: marker.type.toUpperCase(),
-            Descriere: marker.description,
-            Severitate: marker.severity
-          },
-          popupTemplate: {
-            title: '{Tip}',
-            content: 'Severitate: {Severitate}/5<br>Descriere: {Descriere}'
-          }
-        });
-
-        graphicsLayer.add(graphic);
-      });
-
-      map.add(graphicsLayer);
-
-      const heatmapGraphics = data.markers.map((marker, index) => {
-        return new Graphic({
-          geometry: new Point({ longitude: marker.lng, latitude: marker.lat }),
-          attributes: {
-            ObjectID: index,
-            severity_val: marker.severity
-          }
-        });
-      });
-
-      const heatmapLayer = new FeatureLayer({
-        source: heatmapGraphics,
-        objectIdField: 'ObjectID',
-        fields: [
-          { name: 'ObjectID', alias: 'ObjectID', type: 'oid' },
-          { name: 'severity_val', alias: 'Severity Value', type: 'integer' }
-        ],
-        renderer: new HeatmapRenderer({
-          field: 'severity_val',
-          colorStops: [
-            { ratio: 0, color: 'rgba(0, 255, 0, 0)' },
-            { ratio: 0.2, color: 'rgba(0, 255, 0, 1)' },
-            { ratio: 0.5, color: 'rgba(255, 255, 0, 1)' },
-            { ratio: 0.8, color: 'rgba(255, 140, 0, 1)' },
-            { ratio: 1, color: 'rgba(255, 0, 0, 1)' }
-          ],
-          radius: 16
-        }) as any
-      });
-
-      map.add(heatmapLayer, 0);
+      await loadIncidents();
       layersLoadedRef.current = true;
 
       view.on('click', async (event) => {
         const response = await view.hitTest(event);
-        const hitMarker = response.results.find((result: any) => {
-          return (
-            result.graphic &&
-            result.graphic.layer &&
-            result.graphic.layer.title === 'Markere Incidente'
-          );
-        });
+        const hitFavorite = response.results.find((result: any) => {
+          return result?.graphic?.layer?.title === 'Favorite Places';
+        }) as any;
 
-        // During point picking we should not block selection even if a marker is hit.
-        if (hitMarker && !forcePointSelection) {
-          return;
+        if (hitFavorite?.graphic?.attributes?.favoriteId != null) {
+          const favoriteId = hitFavorite.graphic.attributes.favoriteId;
+          const favorite = favoritesRef.current.find((fav) => fav.id === favoriteId);
+          if (favorite) {
+            // While picking start/end (forcePointSelection), consume the click for routing.
+            if (forcePointSelection) {
+              favoriteHandlerRef.current?.(favorite);
+              return;
+            }
+            // Otherwise, allow map click to continue so incidents can be added near favorites.
+          }
+        }
+
+        const hitMarker = response.results.find((result: any) => {
+          return result?.graphic?.layer?.title === 'Markere Incidente';
+        }) as any;
+
+        if (hitMarker && hitMarker.graphic?.attributes?.ObjectId != null) {
+          const eventId = hitMarker.graphic.attributes.ObjectId as number;
+          if (canDeleteIncidentsRef.current) {
+            const confirmed = window.confirm('Delete this incident? This action is irreversible.');
+            if (confirmed) {
+              try {
+                await eventsService.deleteEvent(eventId);
+                incidentsDataRef.current = incidentsDataRef.current.filter((e) => e.id !== eventId);
+                incidentsHandlerRef.current?.(incidentsDataRef.current);
+                incidentDeletedHandlerRef.current?.(eventId);
+                incidentsLayerRef.current?.remove(hitMarker.graphic);
+              } catch (err) {
+                console.error('Failed to delete incident', err);
+                alert('Failed to delete incident.');
+              }
+            }
+            return;
+          }
+          // During point picking we should not block selection even if a marker is hit.
+          if (!forcePointSelection) {
+            return;
+          }
         }
         clickHandlerRef.current?.({
           latitude: event.mapPoint.latitude,
@@ -333,6 +418,53 @@ const MapComponent = ({
       });
 
   }, [activeRoute, routeStops, viewReady]);
+
+  // Render favorites layer when favorites change
+  useEffect(() => {
+    if (!viewReady) {
+      return;
+    }
+    const view = viewRef.current;
+    if (!view) return;
+
+    if (!favoritesLayerRef.current) {
+      favoritesLayerRef.current = new GraphicsLayer({ title: 'Favorite Places' });
+      view.map?.add(favoritesLayerRef.current);
+    }
+
+    const layer = favoritesLayerRef.current;
+    layer.removeAll();
+
+    favorites.forEach((fav) => {
+      const graphic = new Graphic({
+        geometry: new Point({
+          latitude: fav.latitude,
+          longitude: fav.longitude
+        }),
+        symbol: new SimpleMarkerSymbol({
+          style: 'diamond',
+          color: [123, 31, 162, 0.95],
+          size: '14px',
+          outline: { color: [255, 255, 255], width: 2 }
+        }),
+        attributes: {
+          favoriteId: fav.id,
+          name: fav.name
+        },
+        popupTemplate: {
+          title: fav.name || 'Favorite place',
+          content: `Lat: ${fav.latitude.toFixed(5)}, Lon: ${fav.longitude.toFixed(5)}`
+        }
+      });
+      layer.add(graphic);
+    });
+  }, [favorites, viewReady]);
+
+  // Refresh incidents when parent requests
+  useEffect(() => {
+    if (!viewReady) return;
+    loadIncidents();
+  }, [refreshIncidentsTick, viewReady]);
 
   return <div className="map-container" ref={mapDiv} style={{ height: '100%', width: '100%' }} />;
 };

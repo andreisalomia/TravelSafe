@@ -3,9 +3,11 @@ import { Navbar, Container, Nav, Button } from 'react-bootstrap';
 interface NavbarComponentProps {
   user: { username: string } | null;
   onLogout: () => void;
+  onOpenFavorites: () => void;
+  onOpenNotifications: () => void;
 }
 
-const NavbarComponent = ({ user, onLogout }: NavbarComponentProps) => {
+const NavbarComponent = ({ user, onLogout, onOpenFavorites, onOpenNotifications }: NavbarComponentProps) => {
   return (
     <Navbar bg="dark" variant="dark" className="shadow-sm" style={{ position: 'absolute', top: 0, width: '100%', zIndex: 1000 }}>
       <Container fluid>
@@ -18,6 +20,12 @@ const NavbarComponent = ({ user, onLogout }: NavbarComponentProps) => {
               <Navbar.Text className="me-3">
                 Welcome, <strong>{user.username}</strong>!
               </Navbar.Text>
+              <Button variant="outline-warning" size="sm" className="me-2" onClick={onOpenNotifications}>
+                Notifications
+              </Button>
+              <Button variant="outline-info" size="sm" className="me-2" onClick={onOpenFavorites}>
+                Favorites
+              </Button>
               <Button variant="outline-light" size="sm" onClick={onLogout}>
                 Logout
               </Button>

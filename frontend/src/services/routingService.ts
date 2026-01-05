@@ -36,15 +36,12 @@ const ROUTE_URL = 'https://route-api.arcgis.com/arcgis/rest/services/World/Route
 const STOP_WKID = 4326;
 const ROUTE_OUT_WKID = 4326;
 
-// Barrier radius in meters - incidents will be avoided within this distance
-const BARRIER_RADIUS_METERS = 200; // 200 meters buffer around each incident
-
 let supportedTravelModes: TravelMode[] = [];
 
 const travelModeNames: Record<TravelProfile, string[]> = {
-  car: ['Driving Time', 'Driving Distance', 'Driving'],
-  bicycle: ['Cycling Time', 'Bicycle Time', 'Biking'],
-  pedestrian: ['Walking Time', 'Walking Distance', 'Walking'],
+  car: ['Driving Time', 'Driving Distance'],
+  bicycle: ['Cycling Time', 'Bicycle Time', 'Driving Distance'],
+  pedestrian: ['Walking Time', 'Walking Distance'],
 };
 
 async function ensureTravelModes(): Promise<TravelMode[]> {
@@ -52,23 +49,17 @@ async function ensureTravelModes(): Promise<TravelMode[]> {
     return supportedTravelModes;
   }
   const routeModule: any = route;
-  try {
-    if (typeof routeModule.fetchServiceDescription === 'function') {
-        const info = await routeModule.fetchServiceDescription(ROUTE_URL);
-        supportedTravelModes = info.supportedTravelModes || [];
-    }
-  } catch(e) { console.warn("Could not fetch travel modes", e); }
+  if (typeof routeModule.fetchServiceDescription === 'function') {
+    const info = await routeModule.fetchServiceDescription(ROUTE_URL);
+    supportedTravelModes = info.supportedTravelModes || [];
+  }
   return supportedTravelModes;
 }
 
 function resolveTravelMode(profile: TravelProfile, modes: TravelMode[]): TravelMode | null {
   const candidates = travelModeNames[profile];
   for (const candidate of candidates) {
-    const found = modes.find((mode: any) => 
-        mode.name === candidate || 
-        mode.travelModeName === candidate ||
-        mode.name.includes(candidate)
-    );
+    const found = modes.find((mode: any) => mode.name === candidate || mode.travelModeName === candidate);
     if (found) return found;
   }
   return modes.length ? modes[0] : null;
@@ -88,6 +79,8 @@ function createCirclePolygon(
   const rings: number[][] = [];
   
   // Convert radius from meters to degrees (approximate)
+  // At the equator, 1 degree ≈ 111,320 meters
+  // Adjust for latitude
   const latRadians = (centerLat * Math.PI) / 180;
   const metersPerDegreeLat = 111320;
   const metersPerDegreeLon = 111320 * Math.cos(latRadians);
@@ -108,8 +101,14 @@ function createCirclePolygon(
   });
 }
 
+/**
+ * Get barrier radius based on incident severity
+ * Higher severity = larger avoidance zone
+ */
 function getBarrierRadiusForSeverity(severity: number): number {
-  return 30 + (severity * 20); // Ajustat pentru oraș (mai mic)
+  // Base radius + extra based on severity (1-5)
+  // Severity 1: 100m, Severity 5: 300m
+  return 100 + (severity - 1) * 50;
 }
 
 export async function calculateRoute(
@@ -149,13 +148,14 @@ export async function calculateRoute(
     spatialReference: stopSpatialRef,
   });
 
+  // Filter incidents to avoid based on selected types
   const incidentsToAvoid = plan.avoidTypes.length === 0
     ? []
     : incidents.filter((incident) => plan.avoidTypes.includes(incident.type));
 
   console.log('[RoutingService] Creating barriers for', incidentsToAvoid.length, 'incidents');
 
-  // Create polygon barriers
+  // Create polygon barriers (circles) around incidents
   const polygonBarriers: Graphic[] = incidentsToAvoid.map((incident) => {
     const radius = getBarrierRadiusForSeverity(incident.severity);
     const polygon = createCirclePolygon(
@@ -169,15 +169,28 @@ export async function calculateRoute(
       geometry: polygon,
       attributes: {
         Name: `${incident.type}_${incident.id}`,
-        // MODIFICARE: Folosim Cost (1) in loc de Restrictie (0) pentru a evita erorile
-        BarrierType: 1, 
-        Attr_CostFactor: 10 // Penalizare mare, dar permite trecerea daca e singura optiune
+        BarrierType: 0, // 0 = restriction (complete block)
       },
     });
   });
 
-  // NU mai folosim pointBarriers pentru ca se suprapun si dau eroare
-  const pointBarriers: Graphic[] = [];
+  // Also create point barriers as fallback (some routing services handle them better)
+  const pointBarriers: Graphic[] = incidentsToAvoid.map((incident) => 
+    new Graphic({
+      geometry: new Point({
+        latitude: incident.lat,
+        longitude: incident.lng,
+        spatialReference: stopSpatialRef,
+      }),
+      attributes: { 
+        Name: incident.type,
+        BarrierType: 0,
+        // Add cost attribute to make passing through very expensive
+        Attr_Minutes: 999999,
+        Attr_TravelTime: 999999,
+      },
+    })
+  );
 
   const params = new RouteParameters({
     stops,
@@ -185,35 +198,32 @@ export async function calculateRoute(
     returnDirections: false,
     outputLines: 'true-shape',
     outSpatialReference: spatialReference ?? new SpatialReference({ wkid: ROUTE_OUT_WKID }),
+    // Important: Set to find best route considering barriers
     findBestSequence: false,
     preserveFirstStop: true,
     preserveLastStop: true,
   });
 
   if (travelMode) {
-    // --- MODIFICARE CRITICĂ PENTRU PIETONI ---
-    if (plan.mode === 'pedestrian') {
-        // Ignorăm ierarhia străzilor (nu căuta bulevarde, ia-o pe scurtătură)
-        travelMode.useHierarchy = false;
-        
-        // Permitem întoarcerea oriunde (pietonii se pot întoarce pe loc)
-        (travelMode as any).uturnAtStops = 0; // esriNFSBAllowBacktrack
-
-        // Eliminăm restricțiile de Sens Unic
-        if (travelMode.restrictionAttributeNames) {
-             travelMode.restrictionAttributeNames = travelMode.restrictionAttributeNames.filter(
-                 name => !['OneWay', 'TurnRestriction', 'One Way'].includes(name)
-             );
-        }
-    }
     params.travelMode = travelMode as any;
   }
 
+  // Add polygon barriers (more effective for creating avoidance zones)
   if (polygonBarriers.length > 0) {
     params.polygonBarriers = new FeatureSet({
       features: polygonBarriers,
       spatialReference: stopSpatialRef,
     });
+    console.log('[RoutingService] Added', polygonBarriers.length, 'polygon barriers');
+  }
+
+  // Also add point barriers as additional deterrent
+  if (pointBarriers.length > 0) {
+    params.pointBarriers = new FeatureSet({
+      features: pointBarriers,
+      spatialReference: stopSpatialRef,
+    });
+    console.log('[RoutingService] Added', pointBarriers.length, 'point barriers');
   }
 
   const result = await route.solve(ROUTE_URL, params);
@@ -231,43 +241,24 @@ export async function calculateRoute(
       ? geometry
       : (webMercatorUtils.webMercatorToGeographic(geometry) as Polyline) ?? geometry;
 
-  // --- CALCUL DISTANȚĂ ---
-    let distanceKm = 0;
-    if (typeof attrs.Total_Kilometers === 'number') {
-        distanceKm = attrs.Total_Kilometers;
-    } else if (typeof attrs.Total_Miles === 'number') {
-        distanceKm = attrs.Total_Miles * 1.60934;
-    } else {
-        // Fallback: Calculăm lungimea geometrică dacă API-ul nu returnează atributul
-        // Folosim WebMercatorUtils pentru precizie
-        distanceKm = webMercatorUtils.geodesicLength(geometry, "kilometers");
-    }
+  const distanceKm =
+    typeof attrs.Total_Kilometers === 'number'
+      ? attrs.Total_Kilometers
+      : typeof attrs.Total_Miles === 'number'
+        ? attrs.Total_Miles * 1.60934
+        : undefined;
 
-    // --- CALCUL TIMP (FIX) ---
-    let timeMinutes = 0;
-    
-    // 1. Încercăm să luăm din atributele ArcGIS
-    if (typeof attrs.Total_TravelTime === 'number') {
-        timeMinutes = attrs.Total_TravelTime;
-    } else if (typeof attrs.Total_Time === 'number') {
-        timeMinutes = attrs.Total_Time;
-    } else if (typeof attrs.Total_Minutes === 'number') {
-        timeMinutes = attrs.Total_Minutes;
-    } else {
-        // 2. FALLBACK MANUAL: Dacă ArcGIS nu dă timpul (se întâmplă des la pietoni), îl calculăm noi
-        // Viteze medii: Mașină 30km/h, Bicicletă 15km/h, Pieton 5km/h
-        let speedKmh = 30; 
-        if (plan.mode === 'bicycle') speedKmh = 15;
-        if (plan.mode === 'pedestrian') speedKmh = 5;
-        
-        timeMinutes = (distanceKm / speedKmh) * 60;
-        console.log(`[Routing] Calculated fallback time: ${timeMinutes.toFixed(1)} min (Distance: ${distanceKm.toFixed(2)}km, Speed: ${speedKmh}km/h)`);
-    }
+  const timeMinutes =
+    typeof attrs.Total_TravelTime === 'number'
+      ? attrs.Total_TravelTime
+      : typeof attrs.Total_Time === 'number'
+        ? attrs.Total_Time
+        : undefined;
 
-    return {
-      geometry,
-      geometryWgs84Json: geometryWgs84?.toJSON() ?? geometry.toJSON(),
-      distanceText: `${distanceKm.toFixed(2)} km`,
-      timeText: `${Math.round(timeMinutes)} min`,
-    };
+  return {
+    geometry,
+    geometryWgs84Json: geometryWgs84?.toJSON() ?? geometry.toJSON(),
+    distanceText: distanceKm != null ? `${distanceKm.toFixed(2)} km` : 'distance unavailable',
+    timeText: timeMinutes != null ? `${Math.round(timeMinutes)} min` : 'time unavailable',
+  };
 }

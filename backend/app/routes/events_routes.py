@@ -1,10 +1,12 @@
 from flask import Blueprint, jsonify, request
 from datetime import datetime, timedelta
-from ..models import Event, EventReport, User
+from math import radians, sin, cos, sqrt, atan2
+from ..models import Event, EventReport, User, Notification, UserFavorite
 from ..auth import token_required
 from .. import db
 
 events_bp = Blueprint('events', __name__)
+NEARBY_FAVORITE_DISTANCE_KM = 0.5  # notify favorites within 500m
 
 # --- RUTA NOUĂ PENTRU HARTĂ (Map Data) ---
 @events_bp.route('/map-data', methods=['GET'])
@@ -215,6 +217,8 @@ def create_event(current_user):
             reports_count=1
         )
         db.session.add(report_meta)
+
+        _create_notifications_for_nearby_favorites(new_event)
         
         db.session.commit()
         
@@ -236,6 +240,63 @@ def create_event(current_user):
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': f'Error creating event: {str(e)}'}), 500
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculate distance in kilometers between two lat/long points.
+    """
+    r = 6371.0
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return r * c
+
+
+def _create_notifications_for_nearby_favorites(event: Event) -> None:
+    """
+    Create a notification for any user who has a favorite place within the configured distance.
+    """
+    favorites = UserFavorite.query.all()
+    for fav in favorites:
+        dist = _haversine_km(event.latitude, event.longitude, fav.latitude, fav.longitude)
+        if dist <= NEARBY_FAVORITE_DISTANCE_KM:
+            message = f"New {event.type} near '{fav.name or 'favorite place'}' at {dist:.2f} km"
+            notif = Notification(
+                user_id=fav.user_id,
+                title='Incident nearby',
+                message=message,
+                is_read=0
+            )
+            db.session.add(notif)
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return r * c
+
+
+def _create_notifications_for_nearby_favorites(event: Event) -> None:
+    """
+    Create a notification for any user who has a favorite place within the configured distance.
+    """
+    favorites = UserFavorite.query.all()
+    for fav in favorites:
+        dist = _haversine_km(event.latitude, event.longitude, fav.latitude, fav.longitude)
+        if dist <= NEARBY_FAVORITE_DISTANCE_KM:
+            message = f"New {event.type} near '{fav.name or 'favorite place'}' at {dist:.2f} km"
+            notif = Notification(
+                user_id=fav.user_id,
+                title='Incident nearby',
+                message=message,
+                is_read=0
+            )
+            db.session.add(notif)
 
 @events_bp.route('/<int:event_id>', methods=['PUT'])
 @token_required

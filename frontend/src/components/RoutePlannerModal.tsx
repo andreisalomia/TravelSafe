@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, Form, Button, Badge, Alert, Row, Col } from 'react-bootstrap';
 import type { LatLng, TravelProfile } from '../services/routingService';
+import type { FavoritePlace } from '../services/favoritesService';
 
 interface RoutePlannerModalProps {
   show: boolean;
@@ -11,8 +12,10 @@ interface RoutePlannerModalProps {
   initialAvoidTypes?: string[];
   loading?: boolean;
   error?: string;
+  favorites?: FavoritePlace[];
   onClose: () => void;
   onPickPoint: (target: 'start' | 'end') => void;
+  onSelectFavorite?: (target: 'start' | 'end', favorite: FavoritePlace) => void;
   onSubmit: (plan: { mode: TravelProfile; avoidTypes: string[] }) => void;
 }
 
@@ -31,17 +34,23 @@ const RoutePlannerModal = ({
   initialAvoidTypes = [],
   loading = false,
   error,
+  favorites,
   onClose,
   onPickPoint,
+  onSelectFavorite,
   onSubmit,
 }: RoutePlannerModalProps) => {
   const [mode, setMode] = useState<TravelProfile>(initialMode);
   const [selectedAvoid, setSelectedAvoid] = useState<string[]>(initialAvoidTypes);
+  const [startFavoriteId, setStartFavoriteId] = useState('');
+  const [endFavoriteId, setEndFavoriteId] = useState('');
 
   useEffect(() => {
     if (show) {
       setMode(initialMode);
       setSelectedAvoid(initialAvoidTypes);
+      setStartFavoriteId('');
+      setEndFavoriteId('');
     }
   }, [show, initialMode, initialAvoidTypes]);
 
@@ -49,6 +58,18 @@ const RoutePlannerModal = ({
     setSelectedAvoid((prev) =>
       prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
     );
+  };
+
+  const handleFavoriteSelect = (target: 'start' | 'end', value: string) => {
+    if (!value) return;
+    const favorite = favorites?.find((fav) => fav.id === Number(value));
+    if (!favorite) return;
+    onSelectFavorite?.(target, favorite);
+    if (target === 'start') {
+      setStartFavoriteId('');
+    } else {
+      setEndFavoriteId('');
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -84,6 +105,25 @@ const RoutePlannerModal = ({
                 Pick on map
               </Button>
             </div>
+            {favorites && favorites.length > 0 && (
+              <Form.Select
+                className="mt-2"
+                size="sm"
+                value={startFavoriteId}
+                onChange={(e) => {
+                  setStartFavoriteId(e.target.value);
+                  handleFavoriteSelect('start', e.target.value);
+                }}
+                disabled={loading}
+              >
+                <option value="">Use favorite place...</option>
+                {favorites.map((fav) => (
+                  <option key={fav.id} value={fav.id}>
+                    {fav.name} ({fav.latitude.toFixed(3)}, {fav.longitude.toFixed(3)})
+                  </option>
+                ))}
+              </Form.Select>
+            )}
           </div>
           <div className="mb-3">
             <div className="d-flex justify-content-between align-items-center">
@@ -100,6 +140,25 @@ const RoutePlannerModal = ({
                 Pick on map
               </Button>
             </div>
+            {favorites && favorites.length > 0 && (
+              <Form.Select
+                className="mt-2"
+                size="sm"
+                value={endFavoriteId}
+                onChange={(e) => {
+                  setEndFavoriteId(e.target.value);
+                  handleFavoriteSelect('end', e.target.value);
+                }}
+                disabled={loading}
+              >
+                <option value="">Use favorite place...</option>
+                {favorites.map((fav) => (
+                  <option key={fav.id} value={fav.id}>
+                    {fav.name} ({fav.latitude.toFixed(3)}, {fav.longitude.toFixed(3)})
+                  </option>
+                ))}
+              </Form.Select>
+            )}
           </div>
 
           <Form.Group className="mb-3">
