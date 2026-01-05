@@ -5,9 +5,10 @@ interface NavbarComponentProps {
   onLogout: () => void;
   onOpenFavorites: () => void;
   onOpenNotifications: () => void;
+  onOpenProfile: () => void;
 }
 
-const NavbarComponent = ({ user, onLogout, onOpenFavorites, onOpenNotifications }: NavbarComponentProps) => {
+const NavbarComponent = ({ user, onLogout, onOpenFavorites, onOpenNotifications, onOpenProfile }: NavbarComponentProps) => {
   return (
     <Navbar bg="dark" variant="dark" className="shadow-sm" style={{ position: 'absolute', top: 0, width: '100%', zIndex: 1000 }}>
       <Container fluid>
@@ -25,6 +26,9 @@ const NavbarComponent = ({ user, onLogout, onOpenFavorites, onOpenNotifications 
               </Button>
               <Button variant="outline-info" size="sm" className="me-2" onClick={onOpenFavorites}>
                 Favorites
+              </Button>
+              <Button variant="outline-light" size="sm" className="me-2" onClick={onOpenProfile}>
+                Profile
               </Button>
               <Button variant="outline-light" size="sm" onClick={onLogout}>
                 Logout

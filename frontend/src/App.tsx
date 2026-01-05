@@ -16,6 +16,7 @@ import { routesService, type RouteLogResponse, type RouteOptionsResponse } from 
 import { favoritesService, type FavoritePlace } from './services/favoritesService';
 import { notificationsService, type NotificationItem } from './services/notificationsService';
 import type { MarkerData } from './services/eventsService';
+import ProfileModal from './components/ProfileModel';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -50,12 +51,13 @@ function App() {
   const [routeInfo, setRouteInfo] = useState<{ distanceText: string; timeText: string } | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState('');
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
       const token = authService.getStoredToken();
       const storedUser = authService.getStoredUser();
-      
+
       if (token && storedUser) {
         const isValid = await authService.verifyToken();
         if (isValid) {
@@ -397,6 +399,15 @@ function App() {
     setRouteEvaluation(null);
   };
 
+  const refreshUserData = async () => {
+    try {
+      const userData = await authService.getCurrentUser();
+      setUser(userData);
+    } catch (err) {
+      console.error("Failed to refresh user data", err);
+    }
+  };
+
   if (loading) {
     return (
       <Container fluid className="min-vh-100 d-flex align-items-center justify-content-center">
@@ -434,21 +445,25 @@ function App() {
         onOpenNotifications={() => {
           setShowNotificationsModal(true);
         }}
+        onOpenProfile={() => {
+          refreshUserData();
+          setShowProfileModal(true);
+        }}
       />
       <div style={{ marginTop: '56px', height: 'calc(100vh - 56px)', position: 'relative' }}>
         <MapComponent
           onMapClick={handleMapClick}
-        onIncidentsLoaded={setIncidents}
-        onFavoriteClick={handleFavoriteClick}
-        onIncidentDeleted={handleIncidentDeleted}
-        favorites={favorites}
-        canDeleteIncidents={isAdmin}
-        refreshIncidentsTick={incidentsRefreshTick}
-        // FIX: Use geometryWgs84Json instead of geometry to ensure proper serialization through React state
-        activeRoute={activeRoute?.geometryWgs84Json ?? null}
-        routeStops={{
-          start: routeStart || undefined,
-          end: routeEnd || undefined
+          onIncidentsLoaded={setIncidents}
+          onFavoriteClick={handleFavoriteClick}
+          onIncidentDeleted={handleIncidentDeleted}
+          favorites={favorites}
+          canDeleteIncidents={isAdmin}
+          refreshIncidentsTick={incidentsRefreshTick}
+          // FIX: Use geometryWgs84Json instead of geometry to ensure proper serialization through React state
+          activeRoute={activeRoute?.geometryWgs84Json ?? null}
+          routeStops={{
+            start: routeStart || undefined,
+            end: routeEnd || undefined
           }}
           forcePointSelection={!!pendingSelection}
         />
@@ -544,6 +559,12 @@ function App() {
           </div>
         )}
       </div>
+
+      <ProfileModal
+        show={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        user={user}
+      />
 
       <EventModal
         show={showEventModal}

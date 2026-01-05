@@ -101,7 +101,12 @@ def get_current_user(current_user):
             'username': current_user.username,
             'email': current_user.email,
             'role': current_user.role,
-            'created_at': current_user.created_at.isoformat()
+            'created_at': current_user.created_at.isoformat(),
+            'stats': {
+                'events_reported': len(current_user.events),
+                'favorites_count': len(current_user.favorites),
+                'routes_planned': len(current_user.route_requests)
+            }
         }
     }), 200
 
