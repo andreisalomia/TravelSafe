@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from datetime import datetime, timedelta
 from math import radians, sin, cos, sqrt, atan2
-from ..models import Event, EventReport, User, Notification, UserFavorite
+from ..models import Event, EventReport, User, Notification, UserFavorite, EventComment, db
 from ..auth import token_required
 from .. import db
 
@@ -417,6 +417,66 @@ def report_event(current_user, event_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': f'Error reporting event: {str(e)}'}), 500
+
+@events_bp.route('/<int:event_id>/comments', methods=['GET'])
+def get_comments(event_id):
+    """
+    Returnează toate comentariile pentru un incident specific, ordonate cronologic.
+    """
+    try:
+        # Verificăm dacă evenimentul există
+        event = Event.query.get(event_id)
+        if not event:
+            return jsonify({'message': 'Event not found'}), 404
+
+        # Luăm comentariile
+        comments = EventComment.query.filter_by(event_id=event_id)\
+            .order_by(EventComment.created_at.asc()).all()
+
+        # Transformăm în JSON folosind metoda to_dict() din Model
+        return jsonify([c.to_dict() for c in comments]), 200
+
+    except Exception as e:
+        return jsonify({'message': f'Error fetching comments: {str(e)}'}), 500
+
+
+@events_bp.route('/<int:event_id>/comments', methods=['POST'])
+@token_required
+def add_comment(current_user, event_id):
+    """
+    Adaugă un comentariu nou la un incident.
+    """
+    try:
+        data = request.get_json()
+        
+        # Validare conținut
+        if not data or not data.get('content'):
+            return jsonify({'message': 'Content is required'}), 400
+            
+        content = data.get('content').strip()
+        if not content:
+            return jsonify({'message': 'Comment cannot be empty'}), 400
+
+        # Verificăm existența evenimentului
+        event = Event.query.get(event_id)
+        if not event:
+            return jsonify({'message': 'Event not found'}), 404
+
+        # Creăm comentariul
+        new_comment = EventComment(
+            event_id=event_id,
+            user_id=current_user.id,
+            content=content
+        )
+
+        db.session.add(new_comment)
+        db.session.commit()
+
+        return jsonify(new_comment.to_dict()), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': f'Error adding comment: {str(e)}'}), 500
 
 @events_bp.route('/statistics', methods=['GET'])
 def get_statistics():

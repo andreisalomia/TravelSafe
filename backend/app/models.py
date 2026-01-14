@@ -106,3 +106,25 @@ class RouteEventLink(db.Model):
     event_id = db.Column(db.Integer, db.ForeignKey('events.id'), nullable=False)
     route_id = db.Column(db.Integer, db.ForeignKey('routes.id'), nullable=False)
     impact_score = db.Column(db.Integer)
+    
+class EventComment(db.Model):
+    __tablename__ = 'event_comments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey('events.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relații pentru a accesa ușor datele
+    user = db.relationship('User', backref='comments')
+    event = db.relationship('Event', backref='comments')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'event_id': self.event_id,
+            'user': self.user.username,
+            'content': self.content,
+            'created_at': self.created_at.isoformat()
+        }

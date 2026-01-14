@@ -10,13 +10,14 @@ import Polyline from '@arcgis/core/geometry/Polyline';
 import SimpleLineSymbol from '@arcgis/core/symbols/SimpleLineSymbol';
 import SimpleMarkerSymbol from '@arcgis/core/symbols/SimpleMarkerSymbol';
 import HeatmapRenderer from '@arcgis/core/renderers/HeatmapRenderer';
-
+import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 import { getMapData, type MarkerData, eventsService } from '../services/eventsService';
 import type { FavoritePlace } from '../services/favoritesService';
 
 import '@arcgis/core/assets/esri/themes/light/main.css';
 // commit
 interface MapComponentProps {  
+  onOpenComments?: (eventId: number) => void;
   onMapClick?: (coords: { latitude: number; longitude: number }) => void;
   onIncidentsLoaded?: (markers: MarkerData[]) => void;
   onFavoriteClick?: (favorite: FavoritePlace) => void;
@@ -34,6 +35,7 @@ const MapComponent = ({
   onMapClick,
   onIncidentsLoaded,
   onFavoriteClick,
+  onOpenComments,
   onIncidentDeleted,
   favorites = [],
   canDeleteIncidents = false,
@@ -61,6 +63,12 @@ const MapComponent = ({
   // Track when the view is ready
   const [viewReady, setViewReady] = useState(false);
 
+  const commentsHandlerRef = useRef<typeof onOpenComments | undefined>(undefined);
+  
+  useEffect(() => {
+    commentsHandlerRef.current = onOpenComments;
+}, [onOpenComments]);
+  
   useEffect(() => {
     clickHandlerRef.current = onMapClick;
   }, [onMapClick]);
@@ -128,7 +136,14 @@ const MapComponent = ({
         },
         popupTemplate: {
           title: '{Tip}',
-          content: 'Severitate: {Severitate}/5<br>Descriere: {Descriere}'
+          content: 'Severitate: {Severitate}/5<br>Descriere: {Descriere}',
+          actions: [
+            {
+              title: "Vezi discuția",
+              id: "open-comments",
+              className: "esri-icon-comment"
+            } as any
+          ]
         }
       });
 
@@ -146,7 +161,7 @@ const MapComponent = ({
     });
 
     if (heatmapLayerRef.current && view.map) {
-      view.map.remove(heatmapLayerRef.current);
+      view.map?.remove(heatmapLayerRef.current);
     }
 
     const heatmapLayer = new FeatureLayer({
@@ -170,6 +185,9 @@ const MapComponent = ({
     });
     heatmapLayerRef.current = heatmapLayer;
     view.map.add(heatmapLayer, 0);
+    
+    
+    
   };
 
   // --- CONFIGURARE CULORI ---
@@ -194,54 +212,71 @@ const MapComponent = ({
       container: mapDiv.current,
       map,
       center: [26.1025, 44.4268],
-      zoom: 12
+      zoom: 12,
+      popup: {
+        dockEnabled: true,
+        dockOptions: {
+          buttonEnabled: false,
+          breakpoint: false
+        }
+      }
     });
 
     viewRef.current = view;
 
     view.when(async () => {
-      console.log('[MapComponent] View is ready');
-      
-      // Create route layers immediately when view is ready
+      console.log('[MapComponent] View is ready & loaded');
+
       if (!routeLayerRef.current) {
         routeLayerRef.current = new GraphicsLayer({ title: 'Active Route' });
-        if (view.map) {
-          view.map.add(routeLayerRef.current);
-        }
-        console.log('[MapComponent] Route layer created');
+        view.map?.add(routeLayerRef.current);
       }
       if (!routeStopsLayerRef.current) {
         routeStopsLayerRef.current = new GraphicsLayer({ title: 'Route Stops' });
-        if (view.map) {
-          view.map.add(routeStopsLayerRef.current);
-        }
-        console.log('[MapComponent] Route stops layer created');
+        view.map?.add(routeStopsLayerRef.current);
       }
       
-      // Mark view as ready - this will trigger the route rendering effect
       setViewReady(true);
       
-      if (layersLoadedRef.current) return;
-      await loadIncidents();
-      layersLoadedRef.current = true;
+      if (!layersLoadedRef.current) {
+        await loadIncidents();
+        layersLoadedRef.current = true;
+      }
+
+      // Folosim reactiveUtils pentru a evita erori
+      reactiveUtils.on(
+        () => view.popup,
+        "trigger-action",
+        (event: any) => {
+          if (event.action.id === "open-comments") {
+            const selectedFeature = view.popup?.selectedFeature;
+            if (selectedFeature?.attributes?.ObjectId) {
+                const eventId = selectedFeature.attributes.ObjectId;
+                console.log("➡️ Trimit ID spre App:", eventId);
+                
+                // Aici deschidem modalul
+                commentsHandlerRef.current?.(eventId);
+            } else {
+                console.warn("Nu am găsit ID pe acest incident.");
+            }
+          }
+        }
+      );
 
       view.on('click', async (event) => {
         const response = await view.hitTest(event);
+        
         const hitFavorite = response.results.find((result: any) => {
           return result?.graphic?.layer?.title === 'Favorite Places';
         }) as any;
 
         if (hitFavorite?.graphic?.attributes?.favoriteId != null) {
-          const favoriteId = hitFavorite.graphic.attributes.favoriteId;
-          const favorite = favoritesRef.current.find((fav) => fav.id === favoriteId);
-          if (favorite) {
-            // While picking start/end (forcePointSelection), consume the click for routing.
             if (forcePointSelection) {
-              favoriteHandlerRef.current?.(favorite);
-              return;
+                const favId = hitFavorite.graphic.attributes.favoriteId;
+                const favorite = favoritesRef.current.find(f => f.id === favId);
+                if (favorite) favoriteHandlerRef.current?.(favorite);
+                return;
             }
-            // Otherwise, allow map click to continue so incidents can be added near favorites.
-          }
         }
 
         const hitMarker = response.results.find((result: any) => {
@@ -250,27 +285,31 @@ const MapComponent = ({
 
         if (hitMarker && hitMarker.graphic?.attributes?.ObjectId != null) {
           const eventId = hitMarker.graphic.attributes.ObjectId as number;
+
+          // Admin Delete
           if (canDeleteIncidentsRef.current) {
-            const confirmed = window.confirm('Delete this incident? This action is irreversible.');
-            if (confirmed) {
-              try {
-                await eventsService.deleteEvent(eventId);
-                incidentsDataRef.current = incidentsDataRef.current.filter((e) => e.id !== eventId);
-                incidentsHandlerRef.current?.(incidentsDataRef.current);
-                incidentDeletedHandlerRef.current?.(eventId);
-                incidentsLayerRef.current?.remove(hitMarker.graphic);
-              } catch (err) {
-                console.error('Failed to delete incident', err);
-                alert('Failed to delete incident.');
-              }
-            }
-            return;
+             const confirmed = window.confirm('Delete incident?');
+             if (confirmed) {
+                 try {
+                     await eventsService.deleteEvent(eventId);
+                     // Update UI local
+                     incidentsDataRef.current = incidentsDataRef.current.filter((e) => e.id !== eventId);
+                     incidentsHandlerRef.current?.(incidentsDataRef.current);
+                     incidentDeletedHandlerRef.current?.(eventId);
+                     incidentsLayerRef.current?.remove(hitMarker.graphic);
+                     view.popup?.close();
+                 } catch(e) { console.error(e); }
+             }
+             return;
           }
-          // During point picking we should not block selection even if a marker is hit.
+
           if (!forcePointSelection) {
-            return;
+            console.log("Click pe marker -> Se deschide Popup (nu fac nimic altceva)");
+            return; 
           }
         }
+
+        console.log("Click pe gol -> Creare Incident");
         clickHandlerRef.current?.({
           latitude: event.mapPoint.latitude,
           longitude: event.mapPoint.longitude
@@ -285,7 +324,7 @@ const MapComponent = ({
       }
     };
   }, []);
-
+  
   // Render route when activeRoute changes AND view is ready
   useEffect(() => {
     console.log('[MapComponent] Route effect triggered', { 

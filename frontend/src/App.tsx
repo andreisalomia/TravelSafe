@@ -17,6 +17,7 @@ import { favoritesService, type FavoritePlace } from './services/favoritesServic
 import { notificationsService, type NotificationItem } from './services/notificationsService';
 import type { MarkerData } from './services/eventsService';
 import ProfileModal from './components/ProfileModel';
+import CommentsModal from './components/CommentsModal';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -52,7 +53,9 @@ function App() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState('');
   const [showProfileModal, setShowProfileModal] = useState(false);
-
+  const [activeEventId, setActiveEventId] = useState<number | null>(null);
+  const [showComments, setShowComments] = useState(false);
+  
   useEffect(() => {
     const checkAuth = async () => {
       const token = authService.getStoredToken();
@@ -266,6 +269,16 @@ function App() {
     setShowFavoritesModal(false);
   };
 
+  const handleOpenComments = (eventId: number) => {
+    setActiveEventId(eventId);
+    setShowComments(true);
+  };
+  
+  const handleCloseComments = () => {
+    setShowComments(false);
+    setActiveEventId(null);
+  };
+  
   const handleMapClick = useCallback(
     (coords: LatLng) => {
       if (pendingFavoriteSelection) {
@@ -466,6 +479,8 @@ function App() {
             end: routeEnd || undefined
           }}
           forcePointSelection={!!pendingSelection}
+          
+          onOpenComments={handleOpenComments}
         />
 
         <div className="position-absolute top-0 end-0 m-3 d-flex flex-column align-items-end gap-2" style={{ zIndex: 1000 }}>
@@ -478,6 +493,13 @@ function App() {
             </Alert>
           )}
         </div>
+
+        {showComments && activeEventId && (
+        <CommentsModal 
+          eventId={activeEventId} 
+          onClose={handleCloseComments} 
+        />
+      )}
 
         {routeError && !showRouteModal && (
           <div className="position-absolute bottom-0 start-0 m-3" style={{ zIndex: 1000 }}>
